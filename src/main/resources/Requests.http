@@ -1,0 +1,32 @@
+### Variáveis do Teste (Opcional - Configure o Environment do IntelliJ)
+@baseUrl = http://localhost:8080/api/v1/ai
+
+### 1. Teste de Chamada Base (Sem Cache - Versão 1)
+# Envia o prompt para gerar resposta pela LLM.
+POST {{baseUrl}}/generate
+Content-Type: application/json
+
+{
+  "prompt": "Explique o que é Arquitetura Hexagonal em uma frase curta."
+}
+
+### 2. Teste de Concorrência / Idempotência (Thundering Herd - Versão 2)
+# Envie esta mesma requisição múltiplas vezes (clique em Run várias vezes rapidamente).
+# A primeira deve demorar, e as subsequentes (se no mesmo segundo) devem aguardar o lock
+# ou (se processadas depois) voltar com cacheType "EXACT_HIT".
+POST {{baseUrl}}/generate
+Content-Type: application/json
+
+{
+  "prompt": "Quais os benefícios de usar Redis como Lock Distribuído?"
+}
+
+### 3. Teste de Busca Semântica (Versão 3)
+# Esta requisição tem o mesmo significado da requisição #2, mas palavras diferentes.
+# Deverá ser classificada com a similaridade do Vector Store e voltar como "SEMANTIC_HIT".
+POST {{baseUrl}}/generate
+Content-Type: application/json
+
+{
+  "prompt": "Quais as vantagens de utilizar o Redis para Distributed Lock?"
+}
