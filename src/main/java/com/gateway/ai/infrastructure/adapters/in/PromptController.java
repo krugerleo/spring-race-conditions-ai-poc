@@ -22,6 +22,10 @@ public class PromptController {
 
     @PostMapping("/generate")
     public ResponseEntity<PromptResponseDTO> generate(@RequestBody PromptRequestDTO promptRequestDTO) {
+        if (promptRequestDTO == null || promptRequestDTO.prompt() == null) {
+            throw new IllegalArgumentException("O request ou o prompt não podem ser nulos.");
+        }
+        System.out.print("REQUEST ==========" + promptRequestDTO);
         PromptQuery promptQuery = new PromptQuery(promptRequestDTO.prompt());
         AiAnswer response = processPromptUseCase.process(promptQuery);
         return ResponseEntity.ok(new PromptResponseDTO(response.answer(), response.cacheType()));
