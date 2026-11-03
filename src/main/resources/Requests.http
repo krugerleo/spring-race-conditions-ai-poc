@@ -3,6 +3,7 @@
 
 ### 1. Teste de Chamada Base (Sem Cache - Versão 1)
 # Envia o prompt para gerar resposta pela LLM.
+# Resposta esperada: header X-Cache-Type: MISS
 POST {{baseUrl}}/generate
 Content-Type: application/json
 
@@ -12,8 +13,8 @@ Content-Type: application/json
 
 ### 2. Teste de Concorrência / Idempotência (Thundering Herd - Versão 2)
 # Envie esta mesma requisição múltiplas vezes (clique em Run várias vezes rapidamente).
-# A primeira deve demorar, e as subsequentes (se no mesmo segundo) devem aguardar o lock
-# ou (se processadas depois) voltar com cacheType "EXACT_HIT".
+# A primeira deve demorar, e as subsequentes devem aguardar o lock ou voltar do cache,
+# sem chamar a LLM novamente.
 POST {{baseUrl}}/generate
 Content-Type: application/json
 

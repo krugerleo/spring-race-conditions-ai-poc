@@ -1,90 +1,93 @@
-//package com.gateway.ai;
-//
-//import com.gateway.ai.application.ports.out.LlmServicePort;
-//import com.gateway.ai.application.ports.in.ProcessPromptUseCase;
-//import com.gateway.ai.domain.model.PromptQuery;
-//import org.junit.jupiter.api.BeforeEach;
-//import org.junit.jupiter.api.Test;
-//import org.mockito.Mockito;
-//import org.springframework.beans.factory.annotation.Autowired;
-//import org.springframework.boot.test.context.SpringBootTest;
-//import org.springframework.boot.test.mock.mockito.MockBean;
-//import org.testcontainers.containers.GenericContainer;
-//import org.testcontainers.junit.jupiter.Container;
-//import org.testcontainers.junit.jupiter.Testcontainers;
-//import org.testcontainers.utility.DockerImageName;
-//
-//import java.util.concurrent.CountDownLatch;
-//import java.util.concurrent.ExecutorService;
-//import java.util.concurrent.Executors;
-//import java.util.concurrent.TimeUnit;
-//
-//import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-//import static org.mockito.ArgumentMatchers.anyString;
-//import static org.mockito.Mockito.times;
-//import static org.mockito.Mockito.verify;
-//
-//@SpringBootTest
-//@Testcontainers
-//class ConcurrencyWithRedisTestcontainersTest {
-//
-//    // Sobe um container Redis limpo exclusivamente para o teste
-//    @Container
-//    static GenericContainer<?> redisContainer = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-//            .withExposedPorts(6379);
-//
-//    // Configura dinamicamente a porta do Redis do Testcontainers para o Spring Boot
-//    static {
-//        System.setProperty("spring.data.redis.host", redisContainer.getHost());
-//        System.setProperty("spring.data.redis.port", redisContainer.getMappedPort(6379).toString());
-//    }
-//
-//    @Autowired
-//    private ProcessPromptUseCase processPromptUseCase;
-//
-//    // Mockamos a saída da LLM para NÃO gastar tokens nem chamar a API real
-//    @MockBean
-//    private LlmServicePort llmServicePort;
-//
-//    @BeforeEach
-//    void setUp() {
-//        // Simula uma resposta instantânea da IA
-//        Mockito.when(llmServicePort.generate(anyString()))
-//                .thenReturn("Resposta simulada da IA sem gastar tokens.");
-//    }
-//
-//    @Test
-//    void shouldHandleThunderingHerdUnderHeavyConcurrency() throws InterruptedException {
-//        int threadCount = 30; // 30 threads simultâneas
-//        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-//        CountDownLatch latch = new CountDownLatch(1);
-//
-//        String promptText = "Como funciona o Lock Distribuído?";
-//
-//        for (int i = 0; i < threadCount; i++) {
-//            executor.execute(() -> {
-//                try {
-//                    latch.await(); // Aguarda o tiro de largada
-//                    PromptQuery query = new PromptQuery(promptText);
-//                    processPromptUseCase.process(query);
-//                } catch (Exception ignored) {
-//                }
-//            });
-//        }
-//
-//        // Dispara todas as 30 threads no mesmíssimo milissegundo (Simula Race Condition / Thundering Herd)
-//        latch.countDown();
-//
-//        executor.shutdown();
-//        boolean finished = executor.awaitTermination(10, TimeUnit.SECONDS);
-//
-//        assertDoesNotThrow(() -> {
-//            if (!finished) throw new RuntimeException("Timeout no teste de concorrência.");
-//        });
-//
-//        // 💡 A PROVA DE OURO DA POC:
-//        // Mesmo com 30 threads concorrendo ao mesmo tempo, a LLM real DEVE ser chamada EXATAMENTE 1 ÚNICA VEZ.
-//        // As outras 29 requisições pegaram o Lock ou o Cache Exato do Redis!
-//        verify(llmServicePort, times(1)).generate(anyString());
-//    }
-//}
+package com.gateway.ai;
+
+import com.gateway.ai.application.ports.in.ProcessPromptUseCase;
+import com.gateway.ai.application.ports.out.LlmServicePort;
+import com.gateway.ai.domain.model.AiAnswer;
+import com.gateway.ai.domain.model.PromptQuery;
+import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.output.Response;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.utility.DockerImageName;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+
+@SpringBootTest(properties = "LLM_API_KEY=test")
+class ConcurrencyWithRedisTestcontainersTest {
+
+    private static final int THREADS = 50;
+
+    static final GenericContainer<?> REDIS =
+            new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+                    .withExposedPorts(6379);
+
+    @DynamicPropertySource
+    static void redisProperties(DynamicPropertyRegistry registry) {
+        if (!REDIS.isRunning()) {
+            REDIS.start();
+        }
+        registry.add("spring.data.redis.host", REDIS::getHost);
+        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+    }
+
+    @AfterAll
+    static void stopRedis() {
+        REDIS.stop();
+    }
+
+    @MockitoBean
+    private LlmServicePort llmServicePort;
+
+    @MockitoBean
+    private EmbeddingModel embeddingModel;
+
+    @Autowired
+    private ProcessPromptUseCase processPromptUseCase;
+
+    @Test
+    void shouldCallLlmExactlyOnceUnderHeavyConcurrency() throws Exception {
+        Mockito.when(llmServicePort.generate(anyString())).thenReturn("Resposta simulada da IA");
+        Mockito.when(embeddingModel.embed(anyString()))
+                .thenReturn(Response.from(Embedding.from(new float[]{1f, 0f})));
+
+        ExecutorService executor = Executors.newFixedThreadPool(THREADS);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<AiAnswer>> futures = new ArrayList<>();
+
+        for (int i = 0; i < THREADS; i++) {
+            futures.add(executor.submit(() -> {
+                start.await();
+                return processPromptUseCase.process(new PromptQuery("Como funciona lock distribuído?"));
+            }));
+        }
+
+        start.countDown();
+        executor.shutdown();
+
+        assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS), "Timeout no teste de concorrência");
+
+        for (Future<AiAnswer> future : futures) {
+            assertEquals("Resposta simulada da IA", future.get(1, TimeUnit.SECONDS).answer());
+        }
+
+        Mockito.verify(llmServicePort, Mockito.times(1)).generate(anyString());
+    }
+}

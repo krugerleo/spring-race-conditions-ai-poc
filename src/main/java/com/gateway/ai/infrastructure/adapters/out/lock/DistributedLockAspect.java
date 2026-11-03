@@ -1,6 +1,7 @@
 package com.gateway.ai.infrastructure.adapters.out.lock;
 
 import com.gateway.ai.domain.model.PromptQuery;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -17,9 +18,11 @@ import java.util.concurrent.TimeUnit;
 public class DistributedLockAspect {
 
     private final RedissonClient redissonClient;
+    private final MeterRegistry meterRegistry;
 
-    public DistributedLockAspect(RedissonClient redissonClient) {
+    public DistributedLockAspect(RedissonClient redissonClient, MeterRegistry meterRegistry) {
         this.redissonClient = redissonClient;
+        this.meterRegistry = meterRegistry;
     }
 
     @Around("@annotation(distributedLock)")
@@ -34,8 +37,10 @@ public class DistributedLockAspect {
 
         boolean acquired = lock.tryLock(distributedLock.waitTime(), distributedLock.leaseTime(), TimeUnit.SECONDS);
         if (!acquired) {
+            meterRegistry.counter("ai.locks.timeouts").increment();
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Requisição duplicada em processamento. O sistema está protegendo a cota da LLM.");
         }
+        meterRegistry.counter("ai.locks.acquired").increment();
 
         try {
             return joinPoint.proceed();

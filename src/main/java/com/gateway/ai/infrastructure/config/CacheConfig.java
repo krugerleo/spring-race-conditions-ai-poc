@@ -22,7 +22,7 @@ public class CacheConfig {
                 .serializeKeysWith(RedisSerializationContext.SerializationPair
                         .fromSerializer(RedisSerializer.string()))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair
-                        .fromSerializer(RedisSerializer.json()));
+                        .fromSerializer(RedisSerializer.string()));
 
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(config)
